@@ -92,7 +92,7 @@ def main():
     client = carla.Client('127.0.0.1', 2000)
     client.set_timeout(10.0)
 
-      # Read the opendrive file to a string
+    # Read the opendrive file to a string
     xodr_path = "speedway_5lanes.xodr"
     #xodr_path = "Crossing8Course.xodr"
     od_file = open(xodr_path)

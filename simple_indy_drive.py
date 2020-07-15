@@ -20,23 +20,6 @@ def process_img(image, l_images):
     return #i3/255.0 # normalize the data
 
 
-
-# def process_img(image):
-#   i = np.array(image.raw_data) #raw data is a flattened array
-#   #print(dir(image)) #to see values of camera data
-#   i2 = i.reshape((IM_HEIGHT, IM_WIDTH, 4))
-#   i3 = i2[:, :, :3] 
-#       #camera data is in format of r, g, b, alpha
-#       #entire height, entire width, RGBA up to 3 (rgb)
-#   i4 = i3/255.0
-
-#   print(i4)
-
-#   cv2.imshow("image", i4)
-#   cv2.waitKey(1)
-#   return i3/255.0 #normalize data to get between 0 and 1 --> better for nueral networks
-
-
 def main():
   client = carla.Client('127.0.0.1', 2000)
   client.set_timeout(10.0)
@@ -70,6 +53,8 @@ def main():
   vehicle = world.spawn_actor(blueprint, spawn_point)
   vehicle.apply_control(carla.VehicleControl(throttle=1.0, steer=0.0))
   actor_list.append(vehicle)
+
+  
 
   cam_bp = blueprint_library.find("sensor.camera.rgb")
   cam_bp.set_attribute("image_size_x", f"{IM_WIDTH}")

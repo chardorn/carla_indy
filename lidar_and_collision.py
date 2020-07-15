@@ -3,6 +3,7 @@ import random
 import math
 import numpy as np
 import time
+import transforms3d
 
 actor_list = []
 
@@ -55,14 +56,31 @@ def get_transform(vehicle_location, angle, d=6.4):
     location = carla.Location(d * math.cos(a), d * math.sin(a), 2.0) + vehicle_location
     return carla.Transform(location, carla.Rotation(yaw=180 + angle, pitch=-15))
 
-def handle_lidar(image):
+def save_lidar_image(image, world, vehicle):
+
+    #Convert raw data to coordinates (x,y,z)
     points = np.frombuffer(image.raw_data, dtype=np.dtype('f4'))
     points = np.reshape(points, (int(points.shape[0] / 3), 3))
-    lidar_data = np.array(points[:, :2])
+    transform = vehicle.get_transform()
+    transform = [transform.location.x, transform.location.y, transform.location.z]
+    #print(transform)
 
-    print(lidar_data)
-    #for point in scan.raw_data:
-     #   print(point)
+    for point in points:
+
+        #Rotate into the car's frame
+        vehicle_rotation = vehicle.get_transform().rotation
+        roll = vehicle_rotation.roll 
+        pitch = vehicle_rotation.pitch
+        yaw = vehicle_rotation.yaw + (np.pi / 2)
+        R = transforms3d.euler.euler2mat(roll,pitch,yaw).T
+        point = np.dot(R, point)
+
+        #Move location into car's frame
+        point = np.add(transform, point)
+        location = carla.Location(x=float(point[0]), y=float(point[1]), z=float(point[2]))
+
+        #Draw in world
+        world.debug.draw_point(location, life_time=0)
 
 
 def main():
@@ -79,7 +97,7 @@ def main():
     # Load the opendrive map
     vertex_distance = 2.0  # in meters
     max_road_length = 50.0 # in meters
-    wall_height = 1.0      # in meters
+    wall_height = 5.0      # in meters
     extra_width = 0.6      # in meters
     world = client.generate_opendrive_world(
         data, carla.OpendriveGenerationParameters(
@@ -117,7 +135,6 @@ def main():
     vehicle.set_simulate_physics(True)
 
  
-
     transform = carla.Transform(carla.Location(x=0.8, z=1.7))
 
     #Configure collision sensor
@@ -131,24 +148,26 @@ def main():
     # Find the blueprint of the sensor.
     lidar_bp = world.get_blueprint_library().find('sensor.lidar.ray_cast')
     # Set the time in seconds between sensor captures
-    lidar_bp.set_attribute('sensor_tick', '5.0')
-    lidar_bp.set_attribute('channels', '2')
-    #lidar_bp.set_attribute('upper_fov', '0')
+    lidar_bp.set_attribute('sensor_tick', '0.1')
+    lidar_bp.set_attribute('channels', '1')
+    lidar_bp.set_attribute('upper_fov', '0')
     #lidar_bp.set_attribute('lower_fov', '0')
+    lidar_bp.set_attribute('range', '10') #10 is default
 
-    lidar_bp.set_attribute('points_per_second', '10')
+    lidar_bp.set_attribute('points_per_second', '500')
     #With 2 channels, and 100 points per second, here are 250 points per scan
 
 
     lidar_sensor = world.spawn_actor(lidar_bp, transform, attach_to=vehicle)
     actor_list.append(lidar_sensor)
-    lidar_sensor.listen(lambda data: handle_lidar(data))
+    lidar_sensor.listen(lambda data: save_lidar_image(data, world, vehicle))
 
-
-
+    throttle = 0.85
+    control = carla.VehicleControl(throttle, 0)
+    vehicle.apply_control(control)
 
     while True:
-        time.sleep(10)
+        spectator.set_transform(get_transform(vehicle.get_location(), 145))
 
 
 
