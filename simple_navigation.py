@@ -35,20 +35,27 @@ def main():
         additional_width=extra_width,
         smooth_junctions=True,
         enable_mesh_visibility=True))
-    
+
+    settings = world.get_settings()
+    settings.synchronous_mode = True # Enables synchronous mode
+    settings.fixed_delta_seconds = None # Set a variable time
+    world.apply_settings(settings)
+
+    world_snapshot = world.wait_for_tick()
+    world.on_tick(lambda world_snapshot: do_something(world_snapshot))
+        
     spectator = world.get_spectator()
 
     spawn_actor(world)
 
     while True:
+        world.tick()
         #When all actors have been spawned
         if(len(actor_list) >= 4):
             control_vehicle(actor_list[0])
             camera = actor_list[1]
             spectator.set_transform(camera.get_transform())
-        timestamp = world.wait_for_tick()
-        delta_seconds = timestamp.delta_seconds
-        time.sleep(delta_seconds)
+        world.wait_for_tick()
 
 def control_vehicle(vehicle):
     global waypoint

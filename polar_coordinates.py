@@ -6,10 +6,14 @@ import time
 import transforms3d
 import sklearn
 from sklearn.cluster import KMeans
+import threading
+import matplotlib.pyplot as plt
 
 actor_list = [] 
 waypoint = carla.Location()
+angle = 0
 #Order = vehicle, spectator camera, sensor1, sensor2
+lock = threading.Lock()
 
 def main():
     client = carla.Client('127.0.0.1', 2000)
@@ -43,7 +47,7 @@ def main():
     while True:
         #When all actors have been spawned
         if(len(actor_list) >= 4):
-            #control_vehicle(actor_list[0])
+            control_vehicle(actor_list[0])
             camera = actor_list[1]
             spectator.set_transform(camera.get_transform())
         timestamp = world.wait_for_tick()
@@ -51,18 +55,15 @@ def main():
         time.sleep(delta_seconds)
 
 def control_vehicle(vehicle):
-    global waypoint
+    global angle
     physics_control = vehicle.get_physics_control()
     max_steer = physics_control.wheels[0].max_steer_angle
     rear_axle_center = (physics_control.wheels[2].position + physics_control.wheels[3].position)/200
     offset = rear_axle_center - vehicle.get_location()
     wheelbase = np.linalg.norm([offset.x, offset.y, offset.z])
-    throttle = 0.0
+    throttle = 0.5
     vehicle_transform = vehicle.get_transform()
-    waypoint_location = carla.Location(waypoint[0], waypoint[1], 0)
-    steer = control_pure_pursuit(vehicle_transform, waypoint_location, max_steer, wheelbase)
-    print("steer")
-    print(steer)
+    steer = degrees_to_steering_percentage(angle)
     control = carla.VehicleControl(throttle, steer)
     vehicle.apply_control(control)
 
@@ -106,7 +107,7 @@ def attach_lidar(world, vehicle, transform):
     lidar_bp.set_attribute('lower_fov', '0')
     lidar_bp.set_attribute('range', '30') #10 is default
 
-    lidar_bp.set_attribute('points_per_second', '10000')
+    lidar_bp.set_attribute('points_per_second', '500')
     #With 2 channels, and 100 points per second, here are 250 points per scan
 
 
@@ -214,47 +215,77 @@ def control_pure_pursuit(vehicle_tr, waypoint_location, max_steer, wheelbase):
   steer_deg = np.clip(steer_deg, -max_steer, max_steer)
   return steer_deg / max_steer
 
-def get_polar_coordinates(cartesian_points):
-#Parameter: an array of 3d coordinate triplets
-# [[X1, Y1, Z1], [X2, Y2, Z2], ...]
+def polar_to_cartesian(polar_coordinates):
+    cartesian_coordinates = []
+    for point in polar_coordinates:
+        r = point[0] 
+        theta = point[1]
+
+        x = r * math.cos(theta * math.pi/180.0)
+        y = r * math.sin(theta * math.pi/180.0)
+
+        cartesian_point = [x, y, point[2]]
+        cartesian_coordinates.append(cartesian_point)
+    return cartesian_coordinates
+
+def cartesian_to_polar(cartesian_coordinates):
+    #Parameter: an array of 3d coordinate triplets
+    # [[X1, Y1, Z1], [X2, Y2, Z2], ...]
     polar_coordinates = []
-    for point in cartesian_points:
+    
+    for point in cartesian_coordinates:
+        #print(point)
         x = point[0] 
         y = point[1]
-        radius = math.sqrt(x * x + y * y)
-        theta = math.atan(y/x)
+        radius = np.sqrt(x * x + y * y)
+        theta = np.arctan2(y,x)
         theta = 180 * theta / math.pi #Convert from radians to degrees
         polar_point = [radius, theta, point[2]]
         polar_coordinates.append(polar_point)
+        #print("Converted to: " + str(polar_point))
     return polar_coordinates
 
-def sort_polar_coordinates(polar_coordinates):
-    sorted_coordinates = []
-    polar_coordinates = np.array(polar_coordinates)
-    thetas = np.array(polar_coordinates[:,1])
-    print(thetas)
-    while len(thetas) > 0:
-        index = thetas.argmin()
-        sorted_coordinates.append(polar_coordinates[index])
-        np.delete(thetas, index)
-        np.delete(polar_coordinates, index)
-    print("SORTED")
-    return sorted_coordinates
+def graph_polars(polar_coordinates):
+
+    polar_coordinates.sort(key = lambda point: point[1])
+
+    w = 4
+    h = 3
+    d = 70
+    plt.figure(figsize=(w, h), dpi=d)
+    thetas = np.array(polar_coordinates)[:,1] / 180 * math.pi
+    r = np.array(polar_coordinates)[:,0]
+    print("thetas " + str(thetas))
+    print("r " + str(r))
+    ax = plt.subplot(projection='polar')
+    ax.plot(thetas, r, 'o', color='black')
+
+    plt.savefig("mygraph.png")
+    print("SHOW")
 
     
 def save_lidar_image(image, world, vehicle):
-    global waypoint
+    global angle
+    global lock
+
+    if not lock.acquire(False):
+        return
+
     #Convert raw data to coordinates (x,y,z)
-    print("SCAN:")
+    #print("SCAN:")
     points = np.frombuffer(image.raw_data, dtype=np.dtype('f4'))
-    print(image.horizontal_angle)
-    print(points.shape)
+    #print(image.horizontal_angle)
+    #print(points.shape)
     points = np.reshape(points, (int(points.shape[0] / 3), 3))
 
-    print("POLAR")
-    polars = get_polar_coordinates(points)
-    print(sort_polar_coordinates(polars))
+    polars = cartesian_to_polar(points)
+    #graph_polars(polars)
 
+    points = polar_to_cartesian(polars)
+
+    polars.sort(key = lambda point: point[1])
+
+    find_disparity(polars)
 
     #reshape from list of 4d points to an array of 3d points 
     transform = vehicle.get_transform()
@@ -272,34 +303,52 @@ def save_lidar_image(image, world, vehicle):
     points[:] = [np.dot(R, point) for point in points]
     points[:] = [np.add(transform, point)  for point in points]       #Move location into car's frame
 
-    left_cluster, right_cluster, left_center, right_center = filter_scan(points)
-
-    left = carla.Location(x=float(left_center[0]), y=float(left_center[1]), z=float(0))
-    world.debug.draw_point(left, life_time=1, color = carla.Color(0, 255, 255))
-
-    right = carla.Location(x=float(right_center[0]), y=float(right_center[1]), z=float(0))
-    world.debug.draw_point(left, life_time=1, color = carla.Color(0, 255, 255))
+    for point in points:
+        location = carla.Location(x=float(point[0]), y=float(point[1]), z=float(0))
+        world.debug.draw_point(location, life_time=1, color = carla.Color(0, 255, 255))
 
 
-    left_front= get_front_points(left_cluster, vehicle.get_transform().location)
-    right_front = get_front_points(right_cluster, vehicle.get_transform().location)
+    lock.release()
 
-    waypoint = waypoint_from_centers(get_center_cluster(left_front), get_center_cluster(right_front))
 
-    left_location = carla.Location(x=float(waypoint[0]), y=float(waypoint[1]), z=float(0))
-    world.debug.draw_point(left_location, life_time=1, color = carla.Color(0, 255, 255))
+def find_disparity(polar_coordinates):
+    global angle
+    max_distance = 0
+    max_disparity_pair = [[],[]]
 
-    #for point in left_front:
-    #    left = carla.Location(x=float(point[0]), y=float(point[1]), z=float(0))
-    #    world.debug.draw_point(left, life_time=1, color = carla.Color(0, 255, 255))
+    polar_coordinates = [i for i in polar_coordinates if i[1] > 0]
 
-    #for point in right_front:
-    #    right = carla.Location(x=float(point[0]), y=float(point[1]), z=float(0))
-    #    world.debug.draw_point(right, life_time=1, color = carla.Color(0, 255, 255))
+    for i in range(len(polar_coordinates) - 1):
+        r1 = polar_coordinates[i][0]
+        theta1 =  polar_coordinates[i][1] / 180 * math.pi
+        r2 = polar_coordinates[i+1][0]
+        theta2 =  polar_coordinates[i+1][1] / 180 * math.pi
+        
+        distance = math.sqrt(r1*r1 + r2*r2 - 2 *r1 *r2 * np.cos(theta1 - theta2))
+        if distance > max_distance:
+            max_distance = distance
+            max_disparity_pair[0] = polar_coordinates[i]
+            max_disparity_pair[1] = polar_coordinates[i+1]
+    angle = (max_disparity_pair[1][1] + max_disparity_pair[0][1]) /2 
+    return 
 
-    
-    
-    
+def degrees_to_steering_percentage(degrees):
+    """ Returns a steering "percentage" value between 0.0 (left) and 1.0
+    (right) that is as close as possible to the requested degrees. The car's
+    wheels can't turn more than max_angle in either direction. """
+    print("degrees = " + str(degrees))
+    degrees = -(degrees - 90)
+    max_angle = 45
+    if degrees < -max_angle:
+        return -1.0
+    if degrees > max_angle:
+        return 1.0
+    # This maps degrees from -max_angle to +max_angle to values from 0 to 1.
+    #   (degrees - min_angle) / (max_angle - min_angle)
+    # = (degrees - (-max_angle)) / (max_angle - (-max_angle))
+    # = (degrees + max_angle) / (max_angle * 2)
+    return (degrees /max_angle)
+
 
 def get_right_lane_nth(waypoint, n):
     out_waypoint = waypoint
