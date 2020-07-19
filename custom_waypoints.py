@@ -322,4 +322,4 @@ if __name__ == "__main__":
         print('destroying actors')
         for actor in actor_list:
            actor.destroy()
-        print('\ndone.')
+        print('\ndone.')done.
