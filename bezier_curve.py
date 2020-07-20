@@ -3,7 +3,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import math
 
+orientation = 0
+actor_list = []
+
 def main():
+    global orientation
+    global actor_list
 
     ##Modifiable Variables
     targetLane = -3
@@ -45,18 +50,35 @@ def main():
     curvy_waypoints = get_curvy_waypoints(waypoints)
 
     #Save graph of plotted points as bezier.png
-    x = [p.transform.location.x for p in curvy_waypoints]
+    x = [- p.transform.location.x for p in curvy_waypoints]
     y = [p.transform.location.y for p in curvy_waypoints]
     plt.plot(x, y, marker = 'o')
-    plt.savefig("bezier.png")
 
     #Set spawning location as initial waypoint
-    waypoint = curvy_waypoints[0]
+    spawnpoint = curvy_waypoints[0]
     blueprint = world.get_blueprint_library().filter('vehicle.*model3*')[0]
-    location = waypoint.transform.location + carla.Vector3D(0, 0, 1.5)
-    rotation = waypoint.transform.rotation
+    location = spawnpoint.transform.location + carla.Vector3D(0, 0, 1.5)
+    rotation = spawnpoint.transform.rotation
+    
+    print("location: " + str(location))
+    print("rotation: " + str(rotation))
     vehicle = world.spawn_actor(blueprint, carla.Transform(location, rotation))
+    actor_list.append(vehicle)
+    print("spawn location: " + str(vehicle.get_transform().location))
+    print("spawn rotation: " + str(vehicle.get_transform().rotation))
+
+    print(world.get_actor(vehicle.id).get_transform())
+
+
     print("SPAWNED!")
+    #plt.plot(-vehicle.get_location().x, vehicle.get_location().y, marker = 'o', color = 'r')
+
+    num = 8
+
+    #print(waypoint_in_front(vehicle, curvy_waypoints[num], spawnpoint))
+
+    plt.axis([-1400, 400, -750, 50])
+    plt.savefig("new_bezier.png")
     
     #Vehicle properties setup
     physics_control = vehicle.get_physics_control()
@@ -70,28 +92,52 @@ def main():
     camera_bp = world.get_blueprint_library().find('sensor.camera.rgb')
     camera_transform = carla.Transform(carla.Location(x=-10,z=10), carla.Rotation(-45,0,0))
     camera = world.spawn_actor(camera_bp, camera_transform, attach_to=vehicle)
+    actor_list.append(camera)
+
+    transform = carla.Transform(carla.Location(x=0.8, z=1.7))
+    attach_imu_sensor(world, vehicle, transform)
 
     ##INSERT MODIFYING WAYPOINTS HERE
 
+    i = 0
+
     while True:
+
+        print(orientation)
 
         #Update the camera view
         spectator.set_transform(camera.get_transform())
 
         #Get next waypoint
-        waypoint = get_next_waypoint(world, vehicle, curvy_waypoints)
+        waypoint = curvy_waypoints[i]
+        if(vehicle.get_location().distance(curvy_waypoints[i].transform.location) < 20):
+            i = i + 1
         world.debug.draw_point(waypoint.transform.location, life_time=5)
 
         #Control vehicle's throttle and steering
-        throttle = 0.85
+        throttle = 0.7
         vehicle_transform = vehicle.get_transform()
         vehicle_location = vehicle_transform.location
         steer = control_pure_pursuit(vehicle_transform, waypoint.transform, max_steer, wheelbase)
         control = carla.VehicleControl(throttle, steer)
         vehicle.apply_control(control)
 
-def get_next_waypoint(world, vehicle, waypoints):
-    vehicle_location = vehicle.get_location()
+def attach_imu_sensor(world, vehicle, transform):
+    #Configure imu sensor
+    imu_bp = world.get_blueprint_library().find('sensor.other.imu')
+    imu_sensor = world.spawn_actor(imu_bp, transform, attach_to=vehicle)
+    actor_list.append(imu_sensor)
+
+    imu_sensor.listen(lambda data: set_orientation(data))
+
+    return imu_sensor
+
+def set_orientation(data):
+    global orientation
+    orientation = data.compass
+
+def get_next_waypoint(world, vehicle, waypoints, spawnpoint):
+    vehicle_location = vehicle.get_transform().location
     min_distance = 1000
     next_waypoint = None
 
@@ -100,7 +146,7 @@ def get_next_waypoint(world, vehicle, waypoints):
 
         #Only check waypoints that are in the front of the vehicle (if x is negative, then the waypoint is to the rear)
         #TODO: Check if this applies for all maps
-        if (waypoint_location - vehicle_location).x > 0:
+        if waypoint_in_front(vehicle, waypoint, spawnpoint):
 
             #Find the waypoint closest to the vehicle, but once vehicle is close to upcoming waypoint, search for next one
             if vehicle_location.distance(waypoint_location) < min_distance and vehicle_location.distance(waypoint_location) > 5:
@@ -109,6 +155,39 @@ def get_next_waypoint(world, vehicle, waypoints):
 
     return next_waypoint
 
+# def waypoint_in_front(vehicle, waypoint, spawnpoint):
+#     global orientation
+
+#     vx = np.copy(float(vehicle.get_location().x))
+#     vy = np.copy(float(vehicle.get_location().y))
+
+#     plt.plot(- waypoint.transftransformorm.location.x, waypoint.transform.location.y, marker = 'o', color = 'g')
+
+#     yaw = vehicle.get_transform().rotation.yaw
+#     #print("yaw = " + str(yaw))
+#     angle = yaw / 180 * math.pi
+#     #print("angle = " + str(angle))
+#     if angle == 0:
+#         slope = 10
+#     else: 
+#         slope = - 1 / (math.tan(angle))
+#     #print("slope = " + str(slope))
+
+#     x_line = np.arange(0, 1250, 40)
+#     y_line = vy + slope * (x_line - vx)
+
+#     plt.plot(- vx,vy,marker = 'o', color = 'm')
+#     print(vx, vy)
+#     print("here")
+
+#     wayy = waypoint.transform.location.y
+#     wayx = - waypoint.transform.location.x
+#     if orientation >= 0 and wayy < vy + slope * (wayx - vx):
+#         return True
+#     #if yaw < 360 and yaw > -180 and wayy < vy + slope * (wayx - vx):
+#         #return True
+
+#     return False
 
 def control_pure_pursuit(vehicle_tr, waypoint_tr, max_steer, wheelbase):
     # TODO: convert vehicle transform to rear axle transform
@@ -148,10 +227,6 @@ def get_curvy_waypoints(waypoints):
         x2 = waypoints[i+1].transform.location.x
         y2 = waypoints[i+1].transform.location.y
         if (abs(x1 - x2) > 1) and (abs(y1 - y2) > 1):
-            print("x1: " + str(x1) + "  x2: " + str(x2))
-            print(abs(x1 - x2))
-            print("y1: " + str(y1) + "  y2: " + str(y2))
-            print(abs(y1 - y2))
             curvy_waypoints.append(waypoints[i])
       
     #To make the path reconnect to the starting location
@@ -161,9 +236,11 @@ def get_curvy_waypoints(waypoints):
 
 if __name__ == '__main__':
 
-  try:
-      main()
-  except KeyboardInterrupt:
-      pass
-  finally:
-      print('\ndone.')
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        for actor in actor_list:
+            actor.destroy()
+        print('\ndone.')
