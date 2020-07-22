@@ -195,6 +195,7 @@ def get_center_cluster(cluster):
 def get_front_points(cluster, vehicle_location):
     front_cluster = []
 
+    #TODO: THIS WILL CAUSE PROBLEMS LATER!!!
     for point in cluster:
          if (carla.Location(float(point[0]), float(point[1]), vehicle_location.z) - vehicle_location).x > 0:
             front_cluster.append(point)

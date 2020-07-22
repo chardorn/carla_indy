@@ -62,7 +62,7 @@ def control_vehicle(vehicle):
     rear_axle_center = (physics_control.wheels[2].position + physics_control.wheels[3].position)/200
     offset = rear_axle_center - vehicle.get_location()
     wheelbase = np.linalg.norm([offset.x, offset.y, offset.z])
-    throttle = 0.5
+    throttle = 0.75
     vehicle_transform = vehicle.get_transform()
     steer = degrees_to_steering_percentage(angle)
     print("steer = " + str(steer))
@@ -73,10 +73,10 @@ def control_vehicle(vehicle):
 
 def spawn_actor(world):
     blueprint = world.get_blueprint_library().filter('vehicle.*model3*')[0]
-    waypoints = world.get_map().generate_waypoints(2.0)
+    waypoints = world.get_map().generate_waypoints(10.0)
 
     targetLane = -3
-    waypoint = waypoints[0]
+    waypoint = waypoints[500]
     waypoint = change_lane(waypoint, targetLane - waypoint.lane_id)
 
     location = waypoint.transform.location + carla.Vector3D(0, 0, 1.5)
@@ -89,7 +89,7 @@ def spawn_actor(world):
 
     #Add spectator camera
     camera_bp = world.get_blueprint_library().find('sensor.camera.rgb')
-    camera_transform = carla.Transform(carla.Location(x=-10,z=10), carla.Rotation(-45,0,0))
+    camera_transform = carla.Transform(carla.Location(x=-10,z=10), carla.Rotation(-30,0,0))
     camera = world.spawn_actor(camera_bp, camera_transform, attach_to=vehicle)
     actor_list.append(camera) #Add to actor_list at [1]
 
@@ -272,7 +272,7 @@ def degrees_to_steering_percentage(degrees):
         return 1.0
     if degrees > max_angle:
         return -1.0
-    if abs(degrees) < 5:
+    if abs(degrees) < 1:
         return 0
         
     return - (degrees / max_angle)
