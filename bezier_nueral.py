@@ -105,6 +105,14 @@ def main():
     transform = carla.Transform(carla.Location(x=0.8, z=1.7))
 
     ##INSERT MODIFYING WAYPOINTS HERE
+    array = []
+    for p in curvy_waypoints:
+            x = '{0:.10f}'.format(float(p.transform.location.x))
+            y = '{0:.10f}'.format(float(p.transform.location.y))
+
+            array.append([x,y])
+    np.savetxt("waypoints.csv", array)
+
 
     max_x = -10000
     max_y = -10000
@@ -187,8 +195,8 @@ def modify_waypoints(curvy_waypoints):
         
     print("number per group " + str(num_per_group))
 
-def control_pure_purs    wp_loc_rel = relative_location(vehicle_tr, waypoint_tr.location) + carla.Vector3D(wheelbase, 0, 0)
-uit(vehicle_tr, waypoint_tr, max_steer, wheelbase, world):
+def control_pure_pursuit(vehicle_tr, waypoint_tr, max_steer, wheelbase, world):
+    wp_loc_rel = relative_location(vehicle_tr, waypoint_tr.location) + carla.Vector3D(wheelbase, 0, 0)
     # TODO: convert vehicle transform to rear axle transform
     wp_ar = [wp_loc_rel.x, wp_loc_rel.y]
     d2 = wp_ar[0]**2 + wp_ar[1]**2

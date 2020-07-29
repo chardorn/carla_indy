@@ -5,16 +5,15 @@ import math
 import time
 
 actor_list = []
-first_quarter_time = None
-second_quarter_time = None
-third_quarter_time = None
-fourth_quarter_time = None
-
+times_array = [0,0,0,0]
 
 def main():
-    global first_quarter_time, second_quarter_time, third_quarter_time, fourth_quarter_time
+    global times_array
     global actor_list
 
+    times_array = np.load("times.npy", allow_pickle=True)
+    print(times_array)
+    
     ##Modifiable Variables
     targetLane = -3
 
@@ -62,7 +61,8 @@ def main():
     plt.plot(x, y, marker = 'o')
 
 
-    i = 5 #initial point
+    #i = 0 #initial point
+    i = len(curvy_waypoints) - 2
 
     #Set spawning location as initial waypoint
     spawnpoint = curvy_waypoints[i]
@@ -83,10 +83,8 @@ def main():
     print("SPAWNED!")
     #plt.plot(-vehicle.get_location().x, vehicle.get_location().y, marker = 'o', color = 'r')
 
-    num = 8
-
     plt.axis([-1400, 400, -750, 50])
-    plt.savefig("new_bezier.png")
+    
     
     #Vehicle properties setup
     physics_control = vehicle.get_physics_control()
@@ -126,38 +124,20 @@ def main():
     print("mid_x, mid_y " + str(mid_x) + "  " + str(mid_y))
 
 
-    start_time = time.clock()
-    section = 1
+    start_time = time.time()
+    section = 0
+
+    while_time = 0.1
+
+    pid = PID_Controller(max_steer, wheelbase, world, while_time)
+
+ 
 
     while True:
 
         loc = vehicle.get_location()
-        #print(loc)
-
-        if section == 1:
-            if loc.y < mid_y:
-                first_quarter_time = time.clock() - start_time
-                section = 2
-                start_time = time.clock()
-                print("first time: " + str(first_quarter_time))
-                continue
-        if section == 2:
-            if loc.x < mid_x:
-                second_quarter_time = time.clock() - start_time
-                section = 3
-                start_time = time.clock()
-        if section == 3:
-            if loc.y > mid_y:
-                third_quarter_time = time.clock() - start_time
-                section = 4
-                start_time = time.clock()
-                continue
-        if section == 4:
-            if loc.x > mid_x:
-                fourth_quarter_time = time.clock() - start_time
-                section = 1
-                start_time = time.clock()
-                continue
+        plt.plot(-loc.x, loc.y, marker = 'o', color = 'r', markersize = 2)
+        plt.savefig("new_bezier.png")
 
 
         #Update the camera view
@@ -165,20 +145,62 @@ def main():
 
         #Get next waypoint
         waypoint = curvy_waypoints[i]
-        if(vehicle.get_location().distance(curvy_waypoints[i].transform.location) < 20):
+        if(vehicle.get_location().distance(curvy_waypoints[i].transform.location) < 15):
             i = i + 1
+            if i >= len(curvy_waypoints) - 1:
+                i = 0
         world.debug.draw_point(waypoint.transform.location, life_time=5)
 
+
         #Control vehicle's throttle and steering
-        throttle = 0.5
+        speed = math.sqrt(vehicle.get_velocity().x ** 2 + vehicle.get_velocity().y ** 2)
+        #print(speed)
+        if speed >= 30:
+            throttle = 0.7
+        else:
+            throttle = 1.0
+        
         vehicle_transform = vehicle.get_transform()
-        vehicle_location = vehicle_transform.location
-        steer = control_pure_pursuit(vehicle_transform, waypoint.transform, max_steer, wheelbase, world)
+        steer = pid.steering_control(vehicle_transform, waypoint.transform)
         control = carla.VehicleControl(throttle, steer)
         vehicle.apply_control(control)
-        #print("steer: " + str(steer))
+
+        time.sleep(while_time)
+        
+
+        if section == 0:
+            if loc.x > mid_x:
+                section = 1
+                start_time = time.time()
+        if section == 1:
+            if loc.y < mid_y:
+                update_times(1, time.time() - start_time)
+                section = 2
+                start_time = time.time()
+                print("first time: " + str(times_array[0]))
+                
+        if section == 2:
+            if loc.x < mid_x:
+                update_times(2, time.time() - start_time)
+                section = 3
+                start_time = time.time()
+        if section == 3:
+            if loc.y > mid_y:
+                update_times(3, time.time() - start_time)
+                section = 4
+                start_time = time.time()
+        if section == 4:
+            if loc.x > mid_x:
+                update_times(4, time.time() - start_time)
+                section = 1
+                start_time = time.time()
 
         time.sleep(0.1)
+
+def update_times(section, time):
+    global times_array
+    if time < times_array[section - 1]:
+        times_array[section - 1] = time
 
 
 def modify_waypoints(curvy_waypoints):
@@ -187,8 +209,8 @@ def modify_waypoints(curvy_waypoints):
         
     print("number per group " + str(num_per_group))
 
-def control_pure_purs    wp_loc_rel = relative_location(vehicle_tr, waypoint_tr.location) + carla.Vector3D(wheelbase, 0, 0)
-uit(vehicle_tr, waypoint_tr, max_steer, wheelbase, world):
+def control_pure_pursuit(vehicle_tr, waypoint_tr, max_steer, wheelbase, world):
+    wp_loc_rel = relative_location(vehicle_tr, waypoint_tr.location) + carla.Vector3D(wheelbase, 0, 0)
     # TODO: convert vehicle transform to rear axle transform
     wp_ar = [wp_loc_rel.x, wp_loc_rel.y]
     d2 = wp_ar[0]**2 + wp_ar[1]**2
@@ -208,13 +230,12 @@ uit(vehicle_tr, waypoint_tr, max_steer, wheelbase, world):
     y = math.sin(angle_rad) * 10  + vehicle_tr.location.y
     x = math.cos(angle_rad) * 10 + vehicle_tr.location.x
 
-    print("x, y " + str(x) + " " + str(y))
+    #print("x, y " + str(x) + " " + str(y))
 
     #world.debug.draw_point(carla.Location(x,y,0), life_time = 1.0)
     world.debug.draw_arrow(vehicle_tr.location, carla.Location(x,y,0), life_time = 1)
     
     return steer_deg / max_steer
-
 
 def relative_location(frame, location):
     origin = frame.location
@@ -223,33 +244,39 @@ def relative_location(frame, location):
     up = frame.get_up_vector()
     disp = location - origin
     x = np.dot([disp.x, disp.y, disp.z], [forward.x, forward.y, forward.z])
-    if x > 50:
-        x = 50
+    #x = np.clip(x, -10, 10)
     y = np.dot([disp.x, disp.y, disp.z], [right.x, right.y, right.z])
-    if y > 50:
-        x = 50
+    #y = np.clip(y, -10, 10)
     z = np.dot([disp.x, disp.y, disp.z], [up.x, up.y, up.z])
 
     #print(carla.Vector3D(x, y, z))
     return carla.Vector3D(x, y, z)
 
-def degrees_to_steering_percentage(degrees):
-    """ Returns a steering "percentage" value between 0.0 (left) and 1.0
-    (right) that is as close as possible to the requested degrees. The car's
-    wheels can't turn more than max_angle in either direction. """
-    degrees = -(degrees - 90)
-    print("degrees = " + str(degrees))
-    max_angle = 45
-    if degrees < -max_angle:
-        return 1.0
-    if degrees > max_angle:
-        return -1.0
-    if abs(degrees) < 5:
-        return 0
-        
-    return - (degrees / max_angle)
+class PID_Controller():
 
+    def __init__(self, max_steer, wheelbase, world, while_time): #TODO: Delete world??
+        self.KP = 0.2
+        self.KD = 0.1 
+        self.past_error = 0
+        self.error = 0
+        self.sum_error = 0
+        self.elapsed_time= while_time
+        self.wheelbase = wheelbase
+        self.max_steer  = max_steer
 
+    def steering_control(self, vehicle_tr, waypoint_tr):
+        wp_loc_rel = relative_location(vehicle_tr, waypoint_tr.location) + carla.Vector3D(self.wheelbase, 0, 0)
+        # TODO: convert vehicle transform to rear axle transform
+        x = wp_loc_rel.x
+        y = wp_loc_rel.y
+        #print("x, y: " + str(x) + " " + str(y))
+        steer_rad = math.tan(y / x)
+        error = math.degrees(steer_rad)
+        #derivative = (error - self.past_error) / self.elapsed_time
+        #output = self.KP * error + self.KD * derivative
+        output = self.KP * error
+        past_error = error
+        return output / self.max_steer
 
 #Returns only the waypoints in one lane
 def single_lane(waypoint_list, lane):
@@ -282,6 +309,7 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         pass
     finally:
+        np.save("times.npy", times_array)
         for actor in actor_list:
             actor.destroy()
         print('\ndone.')
