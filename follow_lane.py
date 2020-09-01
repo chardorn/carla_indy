@@ -77,6 +77,7 @@ def load_opendrive_world(client):
             enable_mesh_visibility=True))
     settings = world.get_settings()
     settings.synchronous_mode = True  # Enables synchronous mode
+    settings.fixed_delta_seconds = 0.05  # simulation time between two frames
     world.apply_settings(settings)
     return world
 
@@ -109,7 +110,9 @@ def control_loop(world_snapshot, world, vehicle, target_lane):
     waypoint = vehicle_waypoint.next(8.0)[0]
     waypoint = change_lane(waypoint, target_lane - waypoint.lane_id)
     throttle = 0.85
-    world.debug.draw_point(vehicle_location, life_time=0)
+    world.debug.draw_point(vehicle_location, size=0.06, life_time=0)
+    world.debug.draw_point(waypoint.transform.location,
+                           size=0.03, color=carla.Color(0, 255, 0), life_time=0)
     steer = control_pure_pursuit(
         vehicle_transform, waypoint.transform, max_steer, wheelbase)
     control = carla.VehicleControl(throttle, steer)
@@ -133,7 +136,7 @@ def main():
 
     world.on_tick(lambda world_snapshot: control_loop(
         world_snapshot, world, vehicle, target_lane))
-    tick_rate = 50.0  # number of ticks per seconds, assuming tick() runs in zero time
+    tick_rate = 50.0  # number of ticks per second, assuming tick() runs in zero time
     while True:
         time.sleep(1/tick_rate)
         world.tick()
