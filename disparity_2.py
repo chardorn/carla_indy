@@ -13,8 +13,8 @@ actor_list = []
 waypoint = carla.Location()
 angle = 0
 target_cartesian = None
+#Order = vehicle, spectator camera, sensor1, sensor2
 lock = threading.Lock()
-
 
 def main():
     global target_cartesian
@@ -44,11 +44,27 @@ def main():
         smooth_junctions=True,
         enable_mesh_visibility=True))
     
-    #vehicle, camera, controller = spawn_actor(world)
-    spawn_actor(world)
+    spectator = world.get_spectator()
 
-    while(True):
-        time.sleep(.1)
+    vehicle, camera, controller = spawn_actor(world)
+
+    if (target_cartesian is not None): #wait until first Lidar scan
+        while True:
+            print(target_cartesian)
+            time.sleep(1)
+            #When all actors have been spawned
+            vehicle_transform = vehicle.get_transform()
+            speed = math.sqrt(vehicle.get_velocity().x ** 2 + vehicle.get_velocity().y ** 2)
+            throttle = controller.throttle_control(speed)
+
+            #print("target polar: " + str(target_cartesian))
+
+            steer = controller.cartesian_steering_control(target_cartesian)
+            #steer = 0
+            print("steer: " + str(steer))
+            control = carla.VehicleControl(throttle, steer)
+            spectator.set_transform(camera.get_transform())
+            vehicle.apply_control(control)
 
 def spawn_actor(world):
     waypoints = world.get_map().generate_waypoints(10.0)
@@ -83,14 +99,10 @@ def spawn_actor(world):
     camera = world.spawn_actor(camera_bp, camera_transform, attach_to=vehicle)
     actor_list.append(camera) #Add to actor_list at [1]
 
-    lidar_sensor = attach_lidar(world, vehicle, transform)
-    #attach_collision_sensor(world, vehicle, transform)
+    attach_lidar(world, vehicle, transform)
+    attach_collision_sensor(world, vehicle, transform)
 
     controller = Pure_Pursuit_Controller(max_steer, wheelbase, world)
-
-    #Commented out to decrease processing
-    lidar_sensor.listen(lambda data: save_lidar_image(data, world, vehicle, controller, camera))
-
 
     return vehicle, camera, controller
 
@@ -99,7 +111,7 @@ def attach_lidar(world, vehicle, transform):
     # Find the blueprint of the sensor.
     lidar_bp = world.get_blueprint_library().find('sensor.lidar.ray_cast')
     # Set the time in seconds between sensor captures
-    #lidar_bp.set_attribute('sensor_tick', '0.1')
+    lidar_bp.set_attribute('sensor_tick', '0.1')
     lidar_bp.set_attribute('channels', '1')
     lidar_bp.set_attribute('upper_fov', '0')
     lidar_bp.set_attribute('lower_fov', '0')
@@ -111,6 +123,9 @@ def attach_lidar(world, vehicle, transform):
 
     lidar_sensor = world.spawn_actor(lidar_bp, transform, attach_to=vehicle)
     actor_list.append(lidar_sensor) #Add at actor_list[2]
+
+    #Commented out to decrease processing
+    lidar_sensor.listen(lambda data: save_lidar_image(data, world, vehicle))
 
     return lidar_sensor
 
@@ -138,9 +153,9 @@ def collision_event(data, world, vehicle):
            a = a-1
 
     spawn_actor(world)
-    time.sleep(3)
+    time.sleep(1)
 
-def save_lidar_image(image, world, vehicle, controller, camera):
+def save_lidar_image(image, world, vehicle):
     global lock
     global target_cartesian
 
@@ -154,6 +169,10 @@ def save_lidar_image(image, world, vehicle, controller, camera):
     #Sort the points by radius
 
     points.sort(key = lambda point: (np.arctan2(point[1], point[0]) * 180  / math.pi))
+    #for point in points:
+        #print((np.arctan2(point[1], point[0]) * 180  / math.pi))
+    for point in points:
+        point[0] = -point[0]
 
     #NOTE: some points have a negative angle, so sorting is seperated
     #Might be worth fixing later
@@ -162,39 +181,35 @@ def save_lidar_image(image, world, vehicle, controller, camera):
     transform = vehicle.get_transform()
     transform = [transform.location.x, transform.location.y, transform.location.z]
     vehicle_rotation = vehicle.get_transform().rotation
-    roll = vehicle_rotation.roll
+    roll = vehicle_rotation.roll 
     pitch = vehicle_rotation.pitch
     yaw = vehicle_rotation.yaw + (np.pi / 2)
     R = transforms3d.euler.euler2mat(roll,pitch,yaw).T
 
-    #left_hand_points = [[p[0], p[1], 0] for p in points]
-    world_points = [np.dot(R, point) for point in points]
+    left_hand_points = [[p[0], -p[1], 0] for p in points]
+    world_points = [np.dot(R, point) for point in left_hand_points]
     world_points[:] = [np.add(transform, point) for point in world_points]       #Move location into car's frame
 
     index1, index2 = find_disparity(points)
     #Switched to points from world_points
     target_cartesian = points[index1]
 
-    graph_cartesian_points(world_points, world_points[index1])
+    graph_cartesian_points(points, points[index1], points[index2])
 
-    print("target: ", points[index1])
     relative_loc = carla.Location(x = world_points[index1][0], y = world_points[index1][1], z = 0.0)
     world.debug.draw_point(relative_loc, life_time=5)
+    relative_loc = carla.Location(x = world_points[index2][0], y = world_points[index2][1], z = 0.0)
+    world.debug.draw_point(relative_loc, life_time=5, color = carla.Color(0, 255, 255))
+    
+    #print("TARGET: " + str(relative_loc))
+    #for point in world_points:
+    #    loc = carla.Location(x = point[0], y = point[1], z = 0.0)
+    #    world.debug.draw_point(loc, life_time=5, color = carla.Color(0, 255, 255))
 
-    spectator = world.get_spectator()
-
-    speed = math.sqrt(vehicle.get_velocity().x ** 2 + vehicle.get_velocity().y ** 2)
-    throttle = controller.throttle_control(speed)
-    steer = controller.cartesian_steering_control(target_cartesian)
-    #steer = controller.cartesian_steering_control([5,20,0])
-    print("steer: " + str(steer))
-    control = carla.VehicleControl(throttle, steer)
-    spectator.set_transform(camera.get_transform())
-    vehicle.apply_control(control)
 
     lock.release()
 
-def graph_cartesian_points(points, target_point):
+def graph_cartesian_points(points, target_point, target_point_2):
     x = [point[0] for point in points]
     y = [point[1] for point in points]
 
@@ -239,27 +254,28 @@ class Pure_Pursuit_Controller():
         return steer / self.max_steer
 
     def cartesian_steering_control(self, cartesian_point):
-        range = 40
         x = cartesian_point[0]
         if x < 0:
             x = x + 3
         if x > 0: 
             x = x - 3
-        y = cartesian_point[1] 
-        steer_rad = np.arctan2(x, y) #Changed from tan to atan
+        y = cartesian_point[1] * 2.5 # Added a scale/extension of 300%
+        steer_rad = math.atan(x / y) #Changed from tan to atan
         steer_deg = np.degrees(steer_rad)
+        print(steer_deg)
         steer = np.clip(steer_deg, -self.max_steer, self.max_steer)
         if abs(steer_deg) < 50:
-            return - steer_deg / (2 * self.max_steer)
+            return steer_deg / (2 * self.max_steer)
         if abs(steer_deg) < 5:
             return 0
 
-        return - steer / self.max_steer
+        return steer / self.max_steer
 
 def find_disparity(cartesian_coordinates):
     #cartesian coordinates are in the car's reference frame
-    max_distance = 0
-    max_disparity_pair = [[],[]]
+    disparity_indexes = list()
+    threshold = 5
+    extension = 2
     #The disparities are in the form of polar coordinates, so
     #the pair is in the form [[radius1, degrees1, height], [radius2, degrees2, height]
     #max_disparity_pair[0] is to the left of max_disparity_pair[1]
@@ -271,10 +287,16 @@ def find_disparity(cartesian_coordinates):
             x2 = cartesian_coordinates[i+1][0]
             y2 =  cartesian_coordinates[i+1][1]
             distance = math.sqrt((x1-x2)**2 + (y1-y2)**2)
-            if distance > max_distance and distance > 5:
-                max_distance = distance
-                index1 = i
-                index2 = i + 1
+            if distance > threshold:
+                disparity_indexes.append(i)
+
+    for i in disparity_indexes:
+        for point in points:
+            x1 = cartesian_coordinates[i][0]
+            y1 =  cartesian_coordinates[i][1]
+            x2 = cartesian_coordinates[i+1][0]
+            y2 =  cartesian_coordinates[i+1][1]
+    
 
     return index1, index2
 

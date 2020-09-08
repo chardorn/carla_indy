@@ -202,7 +202,6 @@ class Autonomous_Vehicle(object):
             self.debug_draw_cartesian(target_cartesian)
             print("steer: " + str(steer))
             control = carla.VehicleControl(throttle, steer)
-            #control = carla.VehicleControl(1.0, 0)
             self.spectator.set_transform(self.camera.get_transform())
             self.vehicle.apply_control(control)
             time.sleep(1)
@@ -227,7 +226,7 @@ class Autonomous_Vehicle(object):
         #With 2 channels, and 100 points per second, here are 250 points per scan
 
         lidar_sensor = world.spawn_actor(lidar_bp, transform, attach_to=self.vehicle)
-        self.actor_list.append(lidar_sensor) #Add at actor_list[2]
+        self.actor_list.append(lidar_sensor)
 
         lidar_sensor.listen(lambda data: self.save_lidar_image(data, world, self.vehicle))
 
