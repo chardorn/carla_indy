@@ -172,14 +172,25 @@ def save_lidar_image(image, world, vehicle):
     points = np.frombuffer(image.raw_data, dtype=np.dtype('f4'))
     points = np.reshape(points, (int(points.shape[0] / 3), 3))
     points = points.tolist()
+    points = [[-p[0], -p[1], 0] for p in points]
+
+    transform = vehicle.get_transform()
+    transform = [transform.location.x, transform.location.y, transform.location.z]
+    vehicle_rotation = vehicle.get_transform().rotation
+    roll = vehicle_rotation.roll
+    pitch = vehicle_rotation.pitch
+    yaw = vehicle_rotation.yaw + (np.pi / 2)
+    R = transforms3d.euler.euler2mat(roll,pitch,yaw).T
+
+    world_points = [np.dot(R, point) for point in points]
+    world_points[:] = [np.add(transform, point) for point in world_points]       #Move location into car's frame
 
     lidar_transform = image.transform
     # lidar_loc = lidar_transform.location
     # forward =
-    for point in points:
-        loc = carla.Location(x=point[0], y=point[1], z=point[2])
-        world.debug.draw_point(
-            lidar_transform.transform(loc), life_time=0.01, color=carla.Color(0, 255, 255))
+    for point in world_points:
+        loc = carla.Location(x=point[0], y=point[1], z=0)
+        world.debug.draw_point(loc, life_time=0.01, color=carla.Color(0, 255, 255))
 
     # Sort the points by radius
     points.sort(key=lambda point: (
