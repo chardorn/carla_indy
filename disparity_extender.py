@@ -67,9 +67,9 @@ def main():
         world_snapshot, vehicle, controller, spectator, camera))
 
     # if (target_cartesian is not None):  # wait until first Lidar scan
-    tick_rate = 50.0  # number of ticks per second, assuming tick() runs in zero time
+    tick_rate = 100.0  # number of ticks per second, assuming tick() runs in zero time
     while True:
-        time.sleep(1/tick_rate)
+        # time.sleep(1/tick_rate)
         world.tick()
 
 
@@ -104,7 +104,7 @@ def spawn_actor(world):
     # Add spectator camera
     camera_bp = world.get_blueprint_library().find('sensor.camera.rgb')
     camera_transform = carla.Transform(
-        carla.Location(x=-10, z=10), carla.Rotation(-30, 0, 0))
+        carla.Location(x=-50, z=50), carla.Rotation(-30, 0, 0))
     camera = world.spawn_actor(camera_bp, camera_transform, attach_to=vehicle)
     actor_list.append(camera)  # Add to actor_list at [1]
 
@@ -121,13 +121,13 @@ def attach_lidar(world, vehicle, transform):
     # Find the blueprint of the sensor.
     lidar_bp = world.get_blueprint_library().find('sensor.lidar.ray_cast')
     # Set the time in seconds between sensor captures
-    lidar_bp.set_attribute('sensor_tick', '0.1')
+    # lidar_bp.set_attribute('sensor_tick', '0.1')
     lidar_bp.set_attribute('channels', '1')
     lidar_bp.set_attribute('upper_fov', '0')
     lidar_bp.set_attribute('lower_fov', '0')
     lidar_bp.set_attribute('range', '50')  # 10 is default
-
-    lidar_bp.set_attribute('points_per_second', '500')
+    lidar_bp.set_attribute('rotation_frequency', '100')
+    # lidar_bp.set_attribute('points_per_second', '500')
     # With 2 channels, and 100 points per second, here are 250 points per scan
 
     lidar_sensor = world.spawn_actor(lidar_bp, transform, attach_to=vehicle)
@@ -168,12 +168,20 @@ def collision_event(data, world, vehicle):
 def save_lidar_image(image, world, vehicle):
     global target_cartesian
 
-    # Convert raw data to coordinates (x,y,z)
+    # Convert raw data to coordinates (x,y,z) in lidar's coords?
     points = np.frombuffer(image.raw_data, dtype=np.dtype('f4'))
     points = np.reshape(points, (int(points.shape[0] / 3), 3))
     points = points.tolist()
-    # Sort the points by radius
 
+    lidar_transform = image.transform
+    # lidar_loc = lidar_transform.location
+    # forward =
+    for point in points:
+        loc = carla.Location(x=point[0], y=point[1], z=point[2])
+        world.debug.draw_point(
+            lidar_transform.transform(loc), life_time=0.01, color=carla.Color(0, 255, 255))
+
+    # Sort the points by radius
     points.sort(key=lambda point: (
         np.arctan2(point[1], point[0]) * 180 / math.pi))
     # for point in points:
@@ -197,7 +205,7 @@ def save_lidar_image(image, world, vehicle):
     left_hand_points = [[p[0], -p[1], 0] for p in points]
     world_points = [np.dot(R, point) for point in left_hand_points]
     # Move location into car's frame
-    world_points[:] = [np.add(transform, point) for point in world_points]
+    # world_points[:] = [np.add(transform, point) for point in world_points]
 
     index1, index2 = find_disparity(points)
     # Switched to points from world_points
@@ -207,16 +215,17 @@ def save_lidar_image(image, world, vehicle):
 
     relative_loc = carla.Location(
         x=world_points[index1][0], y=world_points[index1][1], z=0.0)
-    world.debug.draw_point(relative_loc, life_time=5)
+    world.debug.draw_point(relative_loc, life_time=0.5)
     relative_loc = carla.Location(
         x=world_points[index2][0], y=world_points[index2][1], z=0.0)
-    world.debug.draw_point(relative_loc, life_time=5,
+    world.debug.draw_point(relative_loc, life_time=0.5,
                            color=carla.Color(0, 255, 255))
 
     #print("TARGET: " + str(relative_loc))
     # for point in world_points:
-    #    loc = carla.Location(x = point[0], y = point[1], z = 0.0)
-    #    world.debug.draw_point(loc, life_time=5, color = carla.Color(0, 255, 255))
+    #     loc = carla.Location(x=point[0], y=point[1], z=0.0)
+    #     world.debug.draw_point(
+    #         loc, life_time=5, color=carla.Color(0, 255, 255))
 
 
 # def graph_cartesian_points(points, target_point, target_point_2):
@@ -305,6 +314,14 @@ def find_disparity(cartesian_coordinates):
                 index2 = i + 1
 
     return index1, index2
+
+
+"""Change coordinates
+
+Given global coordinates of a location, and a target frame,
+find the the coordinates of the location in the target frame.
+The frame is given as a transform in the global frame.
+"""
 
 
 def relative_location(frame, location):
