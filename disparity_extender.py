@@ -69,7 +69,7 @@ def main():
     # if (target_cartesian is not None):  # wait until first Lidar scan
     tick_rate = 100.0  # number of ticks per second, assuming tick() runs in zero time
     while True:
-        # time.sleep(1/tick_rate)
+        time.sleep(1/tick_rate)
         world.tick()
 
 
@@ -104,7 +104,7 @@ def spawn_actor(world):
     # Add spectator camera
     camera_bp = world.get_blueprint_library().find('sensor.camera.rgb')
     camera_transform = carla.Transform(
-        carla.Location(x=-50, z=50), carla.Rotation(-30, 0, 0))
+        carla.Location(x=-10, z=10), carla.Rotation(-30, 0, 0))
     camera = world.spawn_actor(camera_bp, camera_transform, attach_to=vehicle)
     actor_list.append(camera)  # Add to actor_list at [1]
 
@@ -134,7 +134,8 @@ def attach_lidar(world, vehicle, transform):
     actor_list.append(lidar_sensor)  # Add at actor_list[2]
 
     # Commented out to decrease processing
-    lidar_sensor.listen(lambda data: save_lidar_image(data, world, vehicle))
+    lidar_sensor.listen(lambda data: save_lidar_image(
+        data, world, vehicle))
 
     return lidar_sensor
 
@@ -175,22 +176,37 @@ def save_lidar_image(image, world, vehicle):
     points = [[-p[0], -p[1], 0] for p in points]
 
     transform = vehicle.get_transform()
-    transform = [transform.location.x, transform.location.y, transform.location.z]
+    transform = [transform.location.x,
+                 transform.location.y, transform.location.z]
     vehicle_rotation = vehicle.get_transform().rotation
     roll = vehicle_rotation.roll
     pitch = vehicle_rotation.pitch
     yaw = vehicle_rotation.yaw + (np.pi / 2)
-    R = transforms3d.euler.euler2mat(roll,pitch,yaw).T
+    R = transforms3d.euler.euler2mat(roll, pitch, yaw).T
 
     world_points = [np.dot(R, point) for point in points]
-    world_points[:] = [np.add(transform, point) for point in world_points]       #Move location into car's frame
+    # Move location into car's frame
+    world_points[:] = [np.add(transform, point) for point in world_points]
 
     lidar_transform = image.transform
-    # lidar_loc = lidar_transform.location
-    # forward =
-    for point in world_points:
-        loc = carla.Location(x=point[0], y=point[1], z=0)
-        world.debug.draw_point(loc, life_time=0.01, color=carla.Color(0, 255, 255))
+    lidar_loc = lidar_transform.location
+    forward = lidar_transform.get_forward_vector()
+    right = lidar_transform.get_right_vector()
+    up = lidar_transform.get_up_vector()
+    world.debug.draw_arrow(lidar_loc, lidar_loc + forward*10, life_time=0.01,
+                           color=carla.Color(255, 0, 0),
+                           thickness=0.4, arrow_size=0.4)
+    world.debug.draw_arrow(lidar_loc, lidar_loc + right*10, life_time=0.01,
+                           color=carla.Color(0, 255, 0),
+                           thickness=0.4, arrow_size=0.4)
+    world.debug.draw_arrow(lidar_loc, lidar_loc + up*10, life_time=0.01,
+                           color=carla.Color(0, 0, 255),
+                           thickness=0.4, arrow_size=0.4)
+
+    for point in points:
+        loc = carla.Location(x=point[0], y=point[1], z=point[2])
+        world.debug.draw_point(
+            lidar_transform.transform(loc), life_time=0.02, color=carla.Color(0, 255, 255))
 
     # Sort the points by radius
     points.sort(key=lambda point: (
