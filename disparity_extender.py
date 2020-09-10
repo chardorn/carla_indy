@@ -17,12 +17,12 @@ target_cartesian = None
 
 def control_loop(world_snapshot, vehicle, controller, spectator, camera):
     global target_cartesian
-    print(target_cartesian)
     # When all actors have been spawned
     speed = math.sqrt(vehicle.get_velocity().x **
                       2 + vehicle.get_velocity().y ** 2)
     throttle = controller.throttle_control(speed)
-    steer = controller.cartesian_steering_control(target_cartesian)
+    steer = 0
+    # steer = controller.cartesian_steering_control(target_cartesian)
     print("steer: " + str(steer))
     control = carla.VehicleControl(throttle, steer)
     spectator.set_transform(camera.get_transform())
@@ -37,7 +37,7 @@ def main():
 
     # Read the opendrive file to a string
     xodr_path = "speedway_5lanes.xodr"
-    #xodr_path = "Crossing8Course.xodr"
+    # xodr_path = "Crossing8Course.xodr"
     od_file = open(xodr_path)
     data = od_file.read()
 
@@ -54,9 +54,10 @@ def main():
             additional_width=extra_width,
             smooth_junctions=True,
             enable_mesh_visibility=True))
+    # world = client.get_world()
     settings = world.get_settings()
     settings.synchronous_mode = True  # Enables synchronous mode
-    settings.fixed_delta_seconds = 0.01  # simulation time between two frames
+    settings.fixed_delta_seconds = 0.005  # simulation time between two frames
     world.apply_settings(settings)
 
     spectator = world.get_spectator()
@@ -67,7 +68,7 @@ def main():
         world_snapshot, vehicle, controller, spectator, camera))
 
     # if (target_cartesian is not None):  # wait until first Lidar scan
-    tick_rate = 100.0  # number of ticks per second, assuming tick() runs in zero time
+    tick_rate = 50.0  # number of ticks per second, assuming tick() runs in zero time
     while True:
         time.sleep(1/tick_rate)
         world.tick()
@@ -90,8 +91,6 @@ def spawn_actor(world):
     vehicle = world.spawn_actor(blueprint, carla.Transform(location, rotation))
     actor_list.append(vehicle)
 
-    transform = carla.Transform(carla.Location(x=0.8, z=1.7))
-
     # Vehicle properties setup
     physics_control = vehicle.get_physics_control()
     max_steer = physics_control.wheels[0].max_steer_angle
@@ -108,6 +107,7 @@ def spawn_actor(world):
     camera = world.spawn_actor(camera_bp, camera_transform, attach_to=vehicle)
     actor_list.append(camera)  # Add to actor_list at [1]
 
+    transform = carla.Transform(carla.Location(x=0.8, z=3))
     attach_lidar(world, vehicle, transform)
     attach_collision_sensor(world, vehicle, transform)
 
@@ -127,8 +127,8 @@ def attach_lidar(world, vehicle, transform):
     lidar_bp.set_attribute('lower_fov', '0')
     lidar_bp.set_attribute('range', '50')  # 10 is default
     lidar_bp.set_attribute('rotation_frequency', '100')
-    # lidar_bp.set_attribute('points_per_second', '500')
-    # With 2 channels, and 100 points per second, here are 250 points per scan
+    # lidar_bp.set_attribute('dropoff_general_rate', '0')
+    # lidar_bp.set_attribute('dropoff_zero_intensity', '0')
 
     lidar_sensor = world.spawn_actor(lidar_bp, transform, attach_to=vehicle)
     actor_list.append(lidar_sensor)  # Add at actor_list[2]
@@ -173,46 +173,47 @@ def save_lidar_image(image, world, vehicle):
     points = np.frombuffer(image.raw_data, dtype=np.dtype('f4'))
     points = np.reshape(points, (int(points.shape[0] / 3), 3))
     points = points.tolist()
-    points = [[-p[0], -p[1], 0] for p in points]
-
-    transform = vehicle.get_transform()
-    transform = [transform.location.x,
-                 transform.location.y, transform.location.z]
-    vehicle_rotation = vehicle.get_transform().rotation
-    roll = vehicle_rotation.roll
-    pitch = vehicle_rotation.pitch
-    yaw = vehicle_rotation.yaw + (np.pi / 2)
-    R = transforms3d.euler.euler2mat(roll, pitch, yaw).T
-
-    world_points = [np.dot(R, point) for point in points]
-    # Move location into car's frame
-    world_points[:] = [np.add(transform, point) for point in world_points]
 
     lidar_transform = image.transform
     lidar_loc = lidar_transform.location
     forward = lidar_transform.get_forward_vector()
     right = lidar_transform.get_right_vector()
     up = lidar_transform.get_up_vector()
-    world.debug.draw_arrow(lidar_loc, lidar_loc + forward*10, life_time=0.01,
+    world.debug.draw_arrow(lidar_loc, lidar_loc + forward*10, life_time=0.02,
                            color=carla.Color(255, 0, 0),
                            thickness=0.4, arrow_size=0.4)
-    world.debug.draw_arrow(lidar_loc, lidar_loc + right*10, life_time=0.01,
+    world.debug.draw_arrow(lidar_loc, lidar_loc + right*10, life_time=0.02,
                            color=carla.Color(0, 255, 0),
                            thickness=0.4, arrow_size=0.4)
-    world.debug.draw_arrow(lidar_loc, lidar_loc + up*10, life_time=0.01,
+    world.debug.draw_arrow(lidar_loc, lidar_loc + up*10, life_time=0.02,
+                           color=carla.Color(0, 0, 255),
+                           thickness=0.4, arrow_size=0.4)
+
+    vehicle_transform = vehicle.get_transform()
+    vehicle_loc = vehicle_transform.location
+    forward = vehicle_transform.get_forward_vector()
+    right = vehicle_transform.get_right_vector()
+    up = vehicle_transform.get_up_vector()
+    world.debug.draw_arrow(vehicle_loc, vehicle_loc + forward*10, life_time=0.02,
+                           color=carla.Color(255, 0, 0),
+                           thickness=0.4, arrow_size=0.4)
+    world.debug.draw_arrow(vehicle_loc, vehicle_loc + right*10, life_time=0.02,
+                           color=carla.Color(0, 255, 0),
+                           thickness=0.4, arrow_size=0.4)
+    world.debug.draw_arrow(vehicle_loc, vehicle_loc + up*10, life_time=0.02,
                            color=carla.Color(0, 0, 255),
                            thickness=0.4, arrow_size=0.4)
 
     for point in points:
-        loc = carla.Location(x=point[0], y=point[1], z=point[2])
+        loc = carla.Location(x=-point[1], y=point[0], z=point[2])
         world.debug.draw_point(
-            lidar_transform.transform(loc), life_time=0.02, color=carla.Color(0, 255, 255))
+            lidar_transform.transform(loc), life_time=0.03, color=carla.Color(0, 255, 255))
 
     # Sort the points by radius
     points.sort(key=lambda point: (
         np.arctan2(point[1], point[0]) * 180 / math.pi))
     # for point in points:
-    #print((np.arctan2(point[1], point[0]) * 180  / math.pi))
+    # print((np.arctan2(point[1], point[0]) * 180  / math.pi))
     for point in points:
         point[0] = -point[0]
 
@@ -234,21 +235,21 @@ def save_lidar_image(image, world, vehicle):
     # Move location into car's frame
     # world_points[:] = [np.add(transform, point) for point in world_points]
 
-    index1, index2 = find_disparity(points)
-    # Switched to points from world_points
-    target_cartesian = points[index1]
+    # index1, index2 = find_disparity(points)
+    # # Switched to points from world_points
+    # target_cartesian = points[index1]
 
     # graph_cartesian_points(points, points[index1], points[index2])
 
-    relative_loc = carla.Location(
-        x=world_points[index1][0], y=world_points[index1][1], z=0.0)
-    world.debug.draw_point(relative_loc, life_time=0.5)
-    relative_loc = carla.Location(
-        x=world_points[index2][0], y=world_points[index2][1], z=0.0)
-    world.debug.draw_point(relative_loc, life_time=0.5,
-                           color=carla.Color(0, 255, 255))
+    # relative_loc = carla.Location(
+    #     x=world_points[index1][0], y=world_points[index1][1], z=0.0)
+    # # world.debug.draw_point(relative_loc, life_time=0.5)
+    # relative_loc = carla.Location(
+    #     x=world_points[index2][0], y=world_points[index2][1], z=0.0)
+    # world.debug.draw_point(relative_loc, life_time=0.5,
+    #                        color = carla.Color(0, 255, 255))
 
-    #print("TARGET: " + str(relative_loc))
+    # print("TARGET: " + str(relative_loc))
     # for point in world_points:
     #     loc = carla.Location(x=point[0], y=point[1], z=0.0)
     #     world.debug.draw_point(
@@ -358,9 +359,9 @@ def relative_location(frame, location):
     up = frame.get_up_vector()
     disp = location - origin
     x = np.dot([disp.x, disp.y, disp.z], [forward.x, forward.y, forward.z])
-    #x = np.clip(x, -10, 10)
+    # x = np.clip(x, -10, 10)
     y = np.dot([disp.x, disp.y, disp.z], [right.x, right.y, right.z])
-    #y = np.clip(y, -10, 10)
+    # y = np.clip(y, -10, 10)
     z = np.dot([disp.x, disp.y, disp.z], [up.x, up.y, up.z])
 
     return carla.Vector3D(x, y, z)
