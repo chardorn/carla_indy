@@ -46,10 +46,10 @@ def main():
     # world = client.get_world()
     settings = world.get_settings()
     settings.synchronous_mode = True  # Enables synchronous mode
-    settings.fixed_delta_seconds = 0.01  # simulation time between two frames
+    settings.fixed_delta_seconds = 0.1  # simulation time between two frames
     world.apply_settings(settings)
 
-    tick_rate = 100.0  # number of ticks per second, assuming tick() runs in zero time
+    tick_rate = 10.0  # number of ticks per second, assuming tick() runs in zero time
 
 
     transform = waypoints = world.get_map().generate_waypoints(10.0)
@@ -116,22 +116,18 @@ class Pure_Pursuit_Controller():
         return steer / self.max_steer
 
     def cartesian_steering_control(self, cartesian_point):
-        range = 40
-        x = cartesian_point[0]
-        if x < 0:
-            x = x + 3
-        if x > 0: 
-            x = x - 3
-        y = cartesian_point[1] 
+        y = cartesian_point[0]
+        x = cartesian_point[1] 
+
         steer_rad = np.arctan2(x, y) #Changed from tan to atan
         steer_deg = np.degrees(steer_rad)
         steer = np.clip(steer_deg, -self.max_steer, self.max_steer)
         if abs(steer_deg) < 50:
-            return - steer_deg / (2 * self.max_steer)
+            return steer_deg / (2 * self.max_steer)
         if abs(steer_deg) < 5:
             return 0
 
-        return - steer / self.max_steer
+        return steer / self.max_steer
 
 ### Global Planner ###
 
@@ -148,20 +144,32 @@ class Disparity_Extender():
         #max_disparity_pair[0] is to the left of max_disparity_pair[1]
         if cartesian_coordinates is None:
             return
-        print(cartesian_coordinates)
-        for i in range(len(cartesian_coordinates) - 1):
-            if cartesian_coordinates[i][1] > 0:
-                x1 = cartesian_coordinates[i][0]
-                y1 =  cartesian_coordinates[i][1]
-                x2 = cartesian_coordinates[i+1][0]
-                y2 =  cartesian_coordinates[i+1][1]
-                distance = math.sqrt((x1-x2)**2 + (y1-y2)**2)
-                if distance > max_distance and distance > 5:
-                    max_distance = distance
-                    index1 = i
-                    index2 = i + 1
 
-        return cartesian_coordinates[index1]
+        for i in range(len(cartesian_coordinates) - 1):
+            x1 = cartesian_coordinates[i][0]
+            y1 =  cartesian_coordinates[i][1]
+            x2 = cartesian_coordinates[i+1][0]
+            y2 =  cartesian_coordinates[i+1][1]
+            distance = math.sqrt((x1-x2)**2 + (y1-y2)**2)
+            if distance > max_distance:
+                max_distance = distance
+                index1 = i #Left point
+                index2 = i + 1 #Right point
+
+
+        extnded_cartesian = self.extend_disparity(cartesian_coordinates[index1])
+        return extnded_cartesian
+
+    def extend_disparity(self, cc):
+        distance_to_extend = 2.5
+        extended_cc = [cc[0], cc[1], cc[2]]
+        if(cc[1] > 0):
+            extended_cc[1] = cc[1] - distance_to_extend
+        
+        else:
+            extended_cc[1] = cc[1] + distance_to_extend
+        
+        return extended_cc
 
 
 class Autonomous_Vehicle(object):
@@ -199,24 +207,37 @@ class Autonomous_Vehicle(object):
         self.throttle = 0
 
         self.lidar_cartesian_points = None
+        self.lidar_transform = None
 
     def control_loop(self):
         
         if self.lidar_cartesian_points is None:
             return
-        # target_cartesian = self.global_planner.get_target_cartesian(self.lidar_cartesian_points)
-        speed = math.sqrt(self.vehicle.get_velocity().x ** 2 + self.vehicle.get_velocity().y ** 2)
-        throttle = self.local_planner.throttle_control(speed)
-        # steer = self.local_planner.cartesian_steering_control(target_cartesian)
+
+        settings = world.get_settings()
+        t_step = settings.fixed_delta_seconds
 
         if self.graph_lidar:
-            for index in range(len(self.lidar_cartesian_points)-1):
-                self.debug_draw_cartesian(self.lidar_cartesian_points[index])
-        # if self.graph_target:
-        #     self.debug_draw_cartesian(target_cartesian)
+            self.debug_draw_cartesians(self.lidar_cartesian_points, t_step)
+
+        target_cartesian = self.global_planner.get_target_cartesian(self.lidar_cartesian_points)
+
+        if self.graph_target:
+            loc = carla.Location(x=target_cartesian[0], y=target_cartesian[1], z=target_cartesian[2])
+            target = self.lidar_transform.transform(loc)
+
+        #print(self.lidar_transform.location)
+        #world.debug.draw_point(target, life_time=t_step, color=carla.Color(255, 0, 0))
+        world.debug.draw_line(self.lidar_transform.location, target, life_time=t_step, color=carla.Color(255, 0, 0))
+
+        speed = math.sqrt(self.vehicle.get_velocity().x ** 2 + self.vehicle.get_velocity().y ** 2)
+        throttle = self.local_planner.throttle_control(speed)
+        steer = self.local_planner.cartesian_steering_control(target_cartesian)
+        print(target_cartesian)
+        print(steer)
+
         # print("steer: " + str(steer))
-        # control = carla.VehicleControl(throttle, steer)
-        control = carla.VehicleControl(throttle, 0)
+        control = carla.VehicleControl(throttle, steer)
         self.spectator.set_transform(self.camera.get_transform())
         self.vehicle.apply_control(control)
 
@@ -247,18 +268,15 @@ class Autonomous_Vehicle(object):
 
         return lidar_sensor
 
-    def debug_draw_cartesian(self, cartesian_coordinate):
+    def debug_draw_cartesians(self, cartesian_coordinates, t_step):
 
-        settings = world.get_settings()
-        t_step = settings.fixed_delta_seconds
 
-        vehicle_transform = self.vehicle.get_transform()
 
-        loc = carla.Location(x=cartesian_coordinate[0], y=cartesian_coordinate[1], z=cartesian_coordinate[2])
-
-        world.debug.draw_point(vehicle_transform.transform(loc), life_time=t_step, color=carla.Color(0, 255, 255))
-        
-        
+        for coordinate in cartesian_coordinates:
+            loc = carla.Location(x=coordinate[0], y=coordinate[1], z=coordinate[2])
+            target = self.lidar_transform.transform(loc)
+            world.debug.draw_point(target, life_time=t_step, color=carla.Color(0, 255, 255))
+            #world.debug.draw_line(self.lidar_transform.location, target, life_time=t_step, color=carla.Color(255, 0, 0))
 
 
         return
@@ -269,6 +287,7 @@ class Autonomous_Vehicle(object):
         #Convert raw data to coordinates (x,y,z)
         points = np.frombuffer(image.raw_data, dtype=np.dtype('f4'))
         points = np.reshape(points, (int(points.shape[0] / 3), 3))
+
         
         #Sort the points by radius
         
@@ -278,15 +297,17 @@ class Autonomous_Vehicle(object):
 
         points.sort(key=lambda point: np.arctan2(point[1], point[0]))
 
-        points = [[p[0], p[1], p[2]] for p in points]
+        # print(len(points))
+        start_index = int(len(points) / 4)
+        end_index = int(len(points) * 3 / 4)
 
-        #addig the negative signs FIXED THE LEFT HAND ISSUE
+        points = points[start_index:end_index]
+
+        self.lidar_transform = image.transform 
 
         self.lidar_cartesian_points = points
 
-        print(image.transform)
-        print(self.vehicle.get_transform())
-
+        
         return
 
     def attach_collision_sensor(self):
